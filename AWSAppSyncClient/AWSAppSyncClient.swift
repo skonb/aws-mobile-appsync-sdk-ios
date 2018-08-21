@@ -561,6 +561,8 @@ public protocol AWSAppSyncOfflineMutationDelegate {
 // The client for making `Mutation`, `Query` and `Subscription` requests.
 public class AWSAppSyncClient: NetworkConnectionNotification {
     
+    typealias S3Data = (bucket: String, key: String, region: String, contentType: String, localUri: String)
+    
     public let apolloClient: ApolloClient?
     public var offlineMutationDelegate: AWSAppSyncOfflineMutationDelegate?
     public let store: ApolloStore?
@@ -718,13 +720,13 @@ public class AWSAppSyncClient: NetworkConnectionNotification {
         let bodyRequest = requestBody(for: mutation)
         let data = try! serializationFormat.serialize(value: bodyRequest)
         let record = AWSAppSyncMutationRecord()
-        if let s3Object = self.checkAndFetchS3Object(variables: mutation.variables) {
+        if let s3Objects = self.checkAndFetchS3Object(variables: mutation.variables), !s3Objects.isEmpty {
             record.type = .graphQLMutationWithS3Object
-            record.s3ObjectInput =  InternalS3ObjectDetails(bucket: s3Object.bucket,
-                                                            key: s3Object.key,
-                                                            region: s3Object.region,
-                                                            contentType: s3Object.contentType,
-                                                            localUri: s3Object.localUri)
+            record.s3ObjectInput = s3Objects.map({ InternalS3ObjectDetails(bucket: $0.bucket,
+                                                                           key: $0.key,
+                                                                           region: $0.region,
+                                                                           contentType: $0.contentType,
+                                                                           localUri: $0.localUri) })
         }
         record.data = data
         record.contentMap = mutation.variables
@@ -735,16 +737,23 @@ public class AWSAppSyncClient: NetworkConnectionNotification {
         return PerformMutationOperation(offlineMutationRecord: record, client: self.apolloClient!, appSyncClient: self, offlineExecutor: self.offlineMutationExecutor!, mutation: mutation, handlerQueue: queue, mutationConflictHandler: conflictResolutionBlock, resultHandler: resultHandler)
     }
     
-    private func checkAndFetchS3Object(variables:GraphQLMap?) -> (bucket: String, key: String, region: String, contentType: String, localUri: String)? {
+    private func checkAndFetchS3Object(variables:GraphQLMap?) -> [S3Data]? {
+        let genarator: ([String: String]) -> S3Data? = { object in
+            guard let bucket = object["bucket"] else { return nil }
+            guard let key = object["key"] else { return nil }
+            guard let region = object["region"] else { return nil }
+            guard let contentType = object["mimeType"] else { return nil }
+            guard let localUri = object["localUri"] else { return nil }
+            return (bucket, key, region, contentType, localUri)
+        }
         if let variables = variables {
             for key in variables.keys {
                 if let object = variables[key].jsonValue as? Dictionary<String, String> {
-                    guard let bucket = object["bucket"] else { return nil }
-                    guard let key = object["key"] else { return nil }
-                    guard let region = object["region"] else { return nil }
-                    guard let contentType = object["mimeType"] else { return nil }
-                    guard let localUri = object["localUri"] else { return nil }
-                    return (bucket, key, region, contentType, localUri)
+                    let obj = genarator(object)
+                    return obj == nil ? nil : [obj!]
+                } else if let objects = variables[key]?.jsonValue as? [Dictionary<String, String>] {
+                    let objs = objects.compactMap{ genarator($0) }
+                    return objs.isEmpty ? nil : objs
                 }
             }
         }
@@ -796,7 +805,7 @@ public final class PerformMutationOperation<Mutation: GraphQLMutation>: InMemory
         dispatchGroup.enter()
         if self.mutationRecord.type == .graphQLMutationWithS3Object {
             // call s3mutation object here
-            let _ = appSyncClient.performMutationWithS3Object(operation: self.mutation, s3Object: self.mutationRecord.s3ObjectInput!, conflictResolutionBlock: mutationConflictHandler, dispatchGroup: dispatchGroup, handlerQueue: handlerQueue, resultHandler: resultHandler)
+            _ = appSyncClient.performMutationWithS3Object(operation: self.mutation, s3Objects: self.mutationRecord.s3ObjectInput!, conflictResolutionBlock: mutationConflictHandler, dispatchGroup: dispatchGroup, handlerQueue: handlerQueue, resultHandler: resultHandler)
         } else {
             let _ = appSyncClient.send(operation: self.mutation, context: nil, conflictResolutionBlock: self.mutationConflictHandler, dispatchGroup: dispatchGroup, handlerQueue: self.handlerQueue, resultHandler: self.resultHandler)
             let _  = dispatchGroup.wait(timeout: DispatchTime(uptimeNanoseconds: 3000000))

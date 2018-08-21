@@ -64,7 +64,7 @@ public class AWSAppSyncMutationRecord {
     var operationTypeClass: String?
     var inmemoryExecutor: InMemoryMutationDelegate?
     var type: MutationType
-    var s3ObjectInput: InternalS3ObjectDetails?
+    var s3ObjectInput: [InternalS3ObjectDetails]?
     var operationString: String?
     
     init(recordIdentifier: String = UUID().uuidString, timestamp: Date = Date(), type: MutationType = .graphQLMutation) {
@@ -261,9 +261,8 @@ class MutationExecutor: NetworkConnectionNotification {
         }
         
         dispatchGroup.enter()
-        if let s3Object = mutation.s3ObjectInput {
-            
-            self.appSyncClient.s3ObjectManager!.upload(s3Object: s3Object) { (isSuccessful, error) in
+        if let s3Objects = mutation.s3ObjectInput {
+            self.appSyncClient.s3ObjectManager?.uploadFiles(s3Objects: s3Objects){ (isSuccessful, error) in
                 if (isSuccessful) {
                     sendDataRequest(mutation: mutation)
                 } else {
