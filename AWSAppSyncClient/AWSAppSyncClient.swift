@@ -587,6 +587,7 @@ public class AWSAppSyncClient: NetworkConnectionNotification {
     private var autoSubmitOfflineMutations: Bool = false
     private var mqttClient = AWSIoTMQTTClient<AnyObject, AnyObject>()
     private var appSyncMQTTClient = AppSyncMQTTClient()
+    private var subscriptionsQueue = DispatchQueue(label: "SubscriptionsQueue", qos: .userInitiated)
     
     internal var connectionStateChangeHandler: ConnectionStateChangeHandler?
     
@@ -686,11 +687,12 @@ public class AWSAppSyncClient: NetworkConnectionNotification {
     public func subscribe<Subscription: GraphQLSubscription>(subscription: Subscription, queue: DispatchQueue = DispatchQueue.main, resultHandler: @escaping SubscriptionResultHandler<Subscription>) throws -> AWSAppSyncSubscriptionWatcher<Subscription>? {
         
         return AWSAppSyncSubscriptionWatcher(client: self.appSyncMQTTClient,
-                                             httpClient: self.httpTransport!,
-                                             store: self.store!,
-                                             subscription: subscription,
-                                             handlerQueue: queue,
-                                             resultHandler: resultHandler)
+                                              httpClient: self.httpTransport!,
+                                              store: self.store!,
+                                              subscriptionsQueue: self.subscriptionsQueue,
+                                              subscription: subscription,
+                                              handlerQueue: queue,
+                                              resultHandler: resultHandler)
     }
     
     /// Performs a mutation by sending it to the server.
