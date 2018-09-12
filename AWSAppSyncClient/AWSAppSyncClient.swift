@@ -748,7 +748,7 @@ public class AWSAppSyncClient: NetworkConnectionNotification {
     }
     
     private func checkAndFetchS3Object(variables:GraphQLMap?) -> [S3Data]? {
-        /// Genarate S3 credientials as an object from the input
+        /// Genarate S3 credientials tuple from the input
         let genarator: ([String: String]) -> S3Data? = { object in
             guard let bucket = object["bucket"] else { return nil }
             guard let key = object["key"] else { return nil }
@@ -763,14 +763,16 @@ public class AWSAppSyncClient: NetworkConnectionNotification {
         
         /*
          Detect S3 object from the inputs
-         There are 4 variety types of input that might contain S3 objects:
-         1. An S3 object is set as an individual argument
-         2. A list of S3 objects as an individual argument
-         3. One or more S3 objects are tied in an individual input
-         4. One or more S3 objects are tied in objects in a list of inputs
+         There are 4 various types of input that might contain S3 objects:
+         1. An S3 object is as an individual argument
+         2. A list of S3 objects is as an individual argument
+         3. One or more S3 objects is as an element of the input
+         4. One or more S3 objects are tied to objects in a list of inputs
          */
         if let variables = variables {
-            for key in variables.keys {
+            /// Filter S3 objects from argument list
+            let fileKeys = variables.keys.filter({ variables[$0].jsonValue is S3Obj || variables[$0].jsonValue is S3Batch })
+            for key in fileKeys {
                 if let object = variables[key].jsonValue as? Dictionary<String, String> {
                     /// For scenario 1, S3 object is an argument
                     let obj = genarator(object)
@@ -779,13 +781,18 @@ public class AWSAppSyncClient: NetworkConnectionNotification {
                     /// For scenario 2, a list of S3 objects is an argument
                     let objs = objects.compactMap{ genarator($0) }
                     return objs.isEmpty ? nil : objs
-                } else if let dict = variables[key]?.jsonValue as? [String: Any] {
-                    /// For scenario 3, one or more S3 objects are tied in the dictionary argument
+                }
+            }
+            /// Filter S3 objects from input argument
+            let inputKeys = variables.keys.filter({ variables[$0].jsonValue is [String: Any] || variables[$0].jsonValue is [[String: Any]] })
+            for key in inputKeys {
+                if let dict = variables[key]?.jsonValue as? [String: Any] {
+                    /// For scenario 3, one or more S3 objects is as an element of the dictionary argument
                     let obj = dict.compactMap({ $0.value as? S3Obj }).compactMap({ genarator($0) })
                     let batch = dict.compactMap({ $0.value as? S3Batch }).map({ val in val.compactMap({ genarator($0) }) }).flatMap({ $0 })
                     return (obj + batch).isEmpty ? nil : obj + batch
                 } else if let arr = variables[key]?.jsonValue as? [[String: Any]] {
-                    /// For scenario 3, one or more S3 objects are tied in the list of dictionaries argument
+                    /// For scenario 4, one or more S3 objects are tied in the list of dictionaries argument
                     let obj = arr.map({ obj in obj.compactMap({ $0.value as? S3Obj }).compactMap({ genarator($0) }) }).flatMap({ $0 })
                     let batch = arr.map({ dict in dict.compactMap({ $0.value as? S3Batch }).map({ val in val.compactMap({ genarator($0) }) }).flatMap({ $0 }) }).flatMap({ $0 })
                     return (obj + batch).isEmpty ? nil : obj + batch
